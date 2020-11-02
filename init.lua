@@ -1,7 +1,7 @@
 local storage = minetest.get_mod_storage()
 local pos1, pos2
 local min, max = math.min, math.max
-local building, build_index, build_data, build_pos, just_placed_node, failed_count, out_of_blocks
+local building, build_index, build_data, build_pos, just_placed_node, failed_count, out_of_blocks, last_good_block
 
 minetest.register_chatcommand("pos1", {
 	description = "Set schematicas position 1 at your current location",
@@ -144,11 +144,12 @@ minetest.register_chatcommand("schemesetindex", {
 		local index = tonumber(param)
 		if not index then return false, "Invalid usage." end
 		build_index = index
+		last_good_block = index
 		return true, "Index Changed"
 	end
 })
 
-minetest.register_globalstep(function()
+local function step()
 	if building then
 		local data = build_data[build_index]
 		if not data then
@@ -158,16 +159,31 @@ minetest.register_globalstep(function()
 		end
 		local pos, node = vector.add(build_pos, data.pos), data.node
 		if just_placed_node then
+			just_placed_node = false
 			local map_node = minetest.get_node_or_nil(pos)
-			if map_node and map_node.name == node then
-				build_index = build_index + 1
-				just_placed_node = false
+			if map_node and map_node.name == node or build_index % 50 == 0 then
+				local lgb = last_good_block or 0
+				if lgb < build_index - 1 then
+					build_index = lgb + 1
+				else
+					if map_node and map_node.name == node then
+						last_good_block = build_index
+						build_index = build_index + 1
+						just_placed_node = true
+						step()
+					end
+				end
+				return			
 			else
 				failed_count = failed_count + 1
 			end
-			if failed_count < 10 then
+			if reliable and failed_count < 10 then
+				return 
+			end
+			if not reliable and not map_node then
 				return
 			end
+			build_index = build_index + 1
 		end
 		failed_count = 0
 		local new_index
@@ -194,9 +210,11 @@ minetest.register_globalstep(function()
 		minetest.localplayer:set_pos(minetest.find_node_near(pos, 5, {"air", "ignore", "mcl_core:water_source", "mcl_core:water_flowing"}, false) or pos)
 		minetest.place_node(pos)
 		just_placed_node = true
-		if build_index % 250 == 0 then
+		if build_index % 500 == 0 then
 			minetest.send_chat_message("[Schematicas] " .. build_index .. " of " .. #build_data .. " blocks placed!")
 		end
 	end
-end)
+end
+
+minetest.register_globalstep(step)
 
